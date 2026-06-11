@@ -7,17 +7,69 @@ on:
   workflow_dispatch:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TOOLCHAIN_REPOSITORY: josegibson/DMS_sparshiq
+  TOOLCHAIN_TAG: toolchain-v1
+  TOOLCHAIN_ASSET: di1-toolchain-v1.tar.gz
+  TOOLCHAIN_SHA256: eecf36cae8f988a8feff6fb7635e0b503bf67b90730e21ae8eb0381b37a80356
+  DI1_SDK_DIR: /opt/di1-sdk
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install AArch64 compiler
-        run: sudo apt-get update -qq && sudo apt-get install -y g++-aarch64-linux-gnu file make
+
+      - name: Cache Di1 toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DI1_SDK_DIR }}
+          key: di1-toolchain-${{ env.TOOLCHAIN_SHA256 }}
+
+      - name: Download Di1 toolchain bundle
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DI1_TOOLCHAIN_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "DI1_TOOLCHAIN_TOKEN must have read access to $TOOLCHAIN_REPOSITORY" >&2
+            exit 1
+          fi
+          gh release download "$TOOLCHAIN_TAG" \
+            --repo "$TOOLCHAIN_REPOSITORY" \
+            --pattern "$TOOLCHAIN_ASSET" \
+            --dir /tmp
+          echo "$TOOLCHAIN_SHA256  /tmp/$TOOLCHAIN_ASSET" | sha256sum --check -
+
+      - name: Extract Di1 toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          sudo mkdir -p "$DI1_SDK_DIR"
+          sudo tar -xzf "/tmp/$TOOLCHAIN_ASSET" -C "$DI1_SDK_DIR"
+
+      - name: Verify toolchain
+        run: |
+          TC_BIN="$DI1_SDK_DIR/toolchain/aarch64-openwrt-icatchtek-bsp4-glibc/toolchain-aarch64_cortex-a53_gcc-7.3.0_glibc/bin"
+          test -e "$TC_BIN/aarch64-openwrt-linux-g++"
+          echo "TC_BIN=$TC_BIN" >> "$GITHUB_ENV"
+          "$TC_BIN/aarch64-openwrt-linux-g++" --version
+
+      - name: Install build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y file make
+
       - name: Build
-        run: make CXX=aarch64-linux-gnu-g++ -j"$(nproc)"
+        run: |
+          export PATH="$TC_BIN:$PATH"
+          make \
+            SDK_DIR="$DI1_SDK_DIR/bsp" \
+            BACKUP_LIB_DIR="$DI1_SDK_DIR/backups" \
+            CXX=aarch64-openwrt-linux-g++ \
+            -j"$(nproc)"
+
       - name: Verify architecture
-        run: file build/cam_surveillance_di1 | grep -q "ARM aarch64"
+        run: |
+          file build/cam_surveillance_di1
+          file build/cam_surveillance_di1 | grep -q "ARM aarch64"
+
       - name: Package artifact
         run: |
           mkdir -p /tmp/cam-surveillance-di1

@@ -3,6 +3,7 @@
 #include "surveillance/ws_util.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include <linux/videodev2.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -34,12 +35,13 @@ int main(int argc,char** argv){
     surveillance::Camera capture;
     if(!capture.open(device,width,height)){std::fprintf(stderr,"Cannot start camera %s\n",device.c_str());return 1;}
     surveillance::CloudVmsClient client(cloud);client.start();
-    std::vector<uint8_t> rgb(width*height*3);uint64_t count=0;auto start=std::chrono::steady_clock::now();
+    std::vector<uint8_t> rgb;uint64_t count=0;auto start=std::chrono::steady_clock::now();
     std::printf("Streaming %s as %s to %s:%d\n",device.c_str(),cloud.device_id.c_str(),cloud.host.c_str(),cloud.port);
-    while(running.load()){std::vector<uint8_t> frame;if(!capture.read(&frame))continue;
-        if(frame.size()<size_t(width*height*2)){std::fprintf(stderr,"Short camera frame\n");continue;}
-        yuyv_to_rgb(frame.data(),rgb.data(),width,height);
-        std::vector<uint8_t> jpeg;stbi_write_jpg_to_func(jpeg_write,&jpeg,width,height,3,rgb.data(),quality);if(jpeg.empty())continue;
+    while(running.load()){surveillance::CameraFrame frame=capture.read();if(!frame.valid)continue;
+        if(frame.format!=V4L2_PIX_FMT_YUYV){std::fprintf(stderr,"Unsupported camera format: 0x%08x\n",frame.format);continue;}
+        if(frame.data.size()<size_t(frame.width)*frame.height*2){std::fprintf(stderr,"Short camera frame\n");continue;}
+        rgb.resize(size_t(frame.width)*frame.height*3);yuyv_to_rgb(frame.data.data(),rgb.data(),frame.width,frame.height);
+        std::vector<uint8_t> jpeg;stbi_write_jpg_to_func(jpeg_write,&jpeg,frame.width,frame.height,3,rgb.data(),quality);if(jpeg.empty())continue;
         ++count;float elapsed=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
         surveillance::CloudFrame out;out.image_b64=surveillance::base64_encode(jpeg.data(),jpeg.size());out.frame=count;out.fps=count/elapsed;out.ts_ms=now_ms();client.publish(std::move(out));}
     client.stop();capture.close();return 0;
