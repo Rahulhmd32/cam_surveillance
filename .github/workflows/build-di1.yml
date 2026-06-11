@@ -1,0 +1,29 @@
+name: "Build - Di1 Camera Surveillance"
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AArch64 compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y g++-aarch64-linux-gnu file make
+      - name: Build
+        run: make CXX=aarch64-linux-gnu-g++ -j"$(nproc)"
+      - name: Verify architecture
+        run: file build/cam_surveillance_di1 | grep -q "ARM aarch64"
+      - name: Package artifact
+        run: |
+          mkdir -p /tmp/cam-surveillance-di1
+          cp build/cam_surveillance_di1 config/camera.conf README.md /tmp/cam-surveillance-di1/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cam-surveillance-di1-${{ github.sha }}
+          path: /tmp/cam-surveillance-di1/
+          retention-days: 30

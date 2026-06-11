@@ -1,58 +1,46 @@
-#include <capture.h>
-
+#include "surveillance/cloud_vms_client.hpp"
+#include "surveillance/camera.hpp"
+#include "surveillance/ws_util.hpp"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-
-#include <linux/videodev2.h>
+#include <string>
+#include <vector>
 
 namespace {
-
 std::atomic<bool> running{true};
-
-void stop_handler(int) {
-    running.store(false);
+void stop_handler(int) { running.store(false); }
+void yuyv_to_rgb(const uint8_t* y, uint8_t* rgb, int w, int h) {
+    auto c=[](int v){ return static_cast<uint8_t>(std::clamp(v,0,255)); };
+    for(int i=0;i<w*h/2;++i,y+=4,rgb+=6){int y0=y[0],u=y[1]-128,y1=y[2],v=y[3]-128;
+        rgb[0]=c(y0+(v*1402>>10));rgb[1]=c(y0-(u*344>>10)-(v*714>>10));rgb[2]=c(y0+(u*1772>>10));
+        rgb[3]=c(y1+(v*1402>>10));rgb[4]=c(y1-(u*344>>10)-(v*714>>10));rgb[5]=c(y1+(u*1772>>10));}
+}
+void jpeg_write(void* ctx,void* data,int size){auto* o=static_cast<std::vector<uint8_t>*>(ctx);auto* p=static_cast<uint8_t*>(data);o->insert(o->end(),p,p+size);}
+int64_t now_ms(){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();}
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-    const char* device = argc > 1 ? argv[1] : "/dev/video3";
-    const uint32_t width = argc > 2 ? static_cast<uint32_t>(std::strtoul(argv[2], nullptr, 10)) : 640;
-    const uint32_t height = argc > 3 ? static_cast<uint32_t>(std::strtoul(argv[3], nullptr, 10)) : 480;
-
-    std::signal(SIGINT, stop_handler);
-    std::signal(SIGTERM, stop_handler);
-
-    V4L2Capture capture;
-    if (capture.init(device, V4L2_PIX_FMT_YUYV, width, height) != 0) {
-        std::fprintf(stderr, "Failed to initialize camera %s\n", device);
-        return 1;
-    }
-    if (capture.start() != 0) {
-        std::fprintf(stderr, "Failed to start camera %s\n", device);
-        capture.cleanup();
-        return 1;
-    }
-
-    uint64_t frame_count = 0;
-    while (running.load()) {
-        video_frame_t frame{};
-        if (capture.getFrame(&frame) != 0) {
-            continue;
-        }
-
-        // Send frame.vaddr and frame.size to the cloud before releasing it.
-        // The memory remains owned by the camera driver.
-        ++frame_count;
-
-        capture.releaseFrame(&frame);
-    }
-
-    capture.stop();
-    capture.cleanup();
-    std::printf("Captured %llu frames\n", static_cast<unsigned long long>(frame_count));
-    return 0;
+int main(int argc,char** argv){
+    std::string device=argc>1?argv[1]:"/dev/video3";
+    surveillance::CloudConfig cloud;
+    if(argc>2)cloud.device_id=argv[2]; if(argc>3)cloud.vehicle_id=argv[3]; if(argc>4)cloud.host=argv[4];
+    constexpr int width=640,height=480,quality=60;
+    std::signal(SIGINT,stop_handler);std::signal(SIGTERM,stop_handler);
+    surveillance::Camera capture;
+    if(!capture.open(device,width,height)){std::fprintf(stderr,"Cannot start camera %s\n",device.c_str());return 1;}
+    surveillance::CloudVmsClient client(cloud);client.start();
+    std::vector<uint8_t> rgb(width*height*3);uint64_t count=0;auto start=std::chrono::steady_clock::now();
+    std::printf("Streaming %s as %s to %s:%d\n",device.c_str(),cloud.device_id.c_str(),cloud.host.c_str(),cloud.port);
+    while(running.load()){std::vector<uint8_t> frame;if(!capture.read(&frame))continue;
+        if(frame.size()<size_t(width*height*2)){std::fprintf(stderr,"Short camera frame\n");continue;}
+        yuyv_to_rgb(frame.data(),rgb.data(),width,height);
+        std::vector<uint8_t> jpeg;stbi_write_jpg_to_func(jpeg_write,&jpeg,width,height,3,rgb.data(),quality);if(jpeg.empty())continue;
+        ++count;float elapsed=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
+        surveillance::CloudFrame out;out.image_b64=surveillance::base64_encode(jpeg.data(),jpeg.size());out.frame=count;out.fps=count/elapsed;out.ts_ms=now_ms();client.publish(std::move(out));}
+    client.stop();capture.close();return 0;
 }
