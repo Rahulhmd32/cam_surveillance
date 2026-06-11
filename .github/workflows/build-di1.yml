@@ -73,7 +73,9 @@ jobs:
       - name: Package artifact
         run: |
           mkdir -p /tmp/cam-surveillance-di1
-          cp build/cam_surveillance_di1 config/camera.conf README.md /tmp/cam-surveillance-di1/
+          cp build/cam_surveillance_di1 config/camera.conf README.md \
+            deploy/run_cam_surveillance.sh deploy/cam_surveillance_service.sh \
+            /tmp/cam-surveillance-di1/
       - uses: actions/upload-artifact@v4
         with:
           name: cam-surveillance-di1-${{ github.sha }}
