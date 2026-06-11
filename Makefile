@@ -13,7 +13,7 @@ CXXFLAGS := -O2 -std=c++17 -Wall -Wextra -Iinclude -I$(DI1UTILS_INC)
 LDFLAGS := -L$(BACKUP_LIB_DIR) -L$(K3000_LIB) \
 	-Wl,-rpath-link,$(BACKUP_LIB_DIR) -Wl,-rpath-link,$(K3000_LIB) \
 	-Wl,--allow-shlib-undefined
-LDLIBS := -ldi1utils -licatsys -lipc_core -loswrapper -lpthread -lrt
+LDLIBS := -ldi1utils -licatsys -lipc_core -loswrapper -lOpenVG -lEGL -lpthread -lrt
 .PHONY: all clean
 all: $(BUILDDIR)/$(TARGET)
 $(BUILDDIR)/$(TARGET): $(OBJS)
