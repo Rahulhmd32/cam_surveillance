@@ -14,8 +14,7 @@ LDFLAGS := -L$(BACKUP_LIB_DIR) -L$(K3000_LIB) \
 	-Wl,-rpath-link,$(BACKUP_LIB_DIR) -Wl,-rpath-link,$(K3000_LIB) \
 	-Wl,--allow-shlib-undefined
 LDLIBS := -ldi1utils -licatcv -licat_api -licatsys -lipc_core -ldrm \
-	-lOpenVG -lEGL -leglnative -ldmprm -ldmpnative -loswrapper \
-	-ldmpallocator -lpthread -lrt
+	-lpthread -lrt
 .PHONY: all clean
 all: $(BUILDDIR)/$(TARGET)
 $(BUILDDIR)/$(TARGET): $(OBJS)

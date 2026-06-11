@@ -1,6 +1,13 @@
 #!/bin/sh
 
-export LD_LIBRARY_PATH=/usr/lib
+if [ ! -e /dev/a3000-0 ]; then
+    insmod /lib/modules/$(uname -r)/dmpvgkm.ko 2>/dev/null || true
+    insmod /lib/modules/$(uname -r)/dmpsv.ko   2>/dev/null || true
+    insmod /lib/modules/$(uname -r)/a3000.ko   2>/dev/null || true
+    sleep 2
+fi
+
+export LD_LIBRARY_PATH=/media/diskc/cam_surveillance/lib:/usr/lib
 
 exec /media/diskc/cam_surveillance/cam_surveillance_di1 \
   /dev/video3 \
